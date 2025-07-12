@@ -155,6 +155,34 @@
 +   }
 +   // CraftBukkit end
 +
++   // Mohist Fix: Add Worker thread pool management
++   private static final java.util.concurrent.ExecutorService workerThreadPool =
++       java.util.concurrent.Executors.newFixedThreadPool(
++           Math.max(2, Runtime.getRuntime().availableProcessors() / 2),
++           r -> {
++               Thread t = new Thread(r, "Worker-Main-" + System.currentTimeMillis());
++               t.setDaemon(true);
++               t.setPriority(Thread.NORM_PRIORITY - 1);
++               return t;
++           }
++       );
++
++   public static java.util.concurrent.ExecutorService getWorkerThreadPool() {
++       return workerThreadPool;
++   }
++
++   public static void shutdownWorkerThreadPool() {
++       try {
++           workerThreadPool.shutdown();
++           if (!workerThreadPool.awaitTermination(5, java.util.concurrent.TimeUnit.SECONDS)) {
++               workerThreadPool.shutdownNow();
++           }
++       } catch (InterruptedException e) {
++           workerThreadPool.shutdownNow();
++           Thread.currentThread().interrupt();
++       }
++   }
++
 +    static record ChunkAndHolder(LevelChunk f_184028_, ChunkHolder f_184029_) {
     }
  

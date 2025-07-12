@@ -304,9 +304,63 @@
 -         this.m_130012_();
 +      if (serverlevel.keepSpawnInMemory) {
 +         serverchunkcache.m_8387_(TicketType.f_9442_, new ChunkPos(blockpos), 11, Unit.INSTANCE);
-+         while (serverchunkcache.m_8427_() != 441) {
++
++         // Mohist Fix: Add mod dimension compatibility checks
++         String dimensionName = serverlevel.dimension().location().toString();
++         boolean isModDimension = !dimensionName.equals("minecraft:overworld") &&
++                                  !dimensionName.equals("minecraft:the_nether") &&
++                                  !dimensionName.equals("minecraft:the_end");
++
++         if (isModDimension) {
++            f_129750_.info("Detected mod dimension: {}, applying special handling", dimensionName);
++            // Special handling for known problematic mod dimensions
++            if (dimensionName.contains("aether")) {
++               f_129750_.warn("Aether dimension detected - using extended timeout and reduced chunk requirements");
++               // Reduce chunk loading requirements for Aether
++               // This prevents the infinite loop issue with Aether's custom chunk generation
++            }
++         }
++
++         // Mohist Fix: Add timeout and safety checks for chunk loading
++         long chunkLoadStartTime = Util.m_137550_();
++         long chunkLoadTimeout = isModDimension ? 120000L : 60000L; // Extended timeout for mod dimensions
++         int maxRetries = isModDimension ? 5 : 3; // More retries for mod dimensions
++         int retryCount = 0;
++
++         // Mohist Fix: Smart chunk loading with mod dimension support
++         int targetChunks = 441;
++         if (isModDimension && dimensionName.contains("aether")) {
++            // Aether dimension often has issues loading all 441 chunks
++            targetChunks = Math.min(200, serverchunkcache.m_8427_() + 50); // Load at least 50 more chunks
++            f_129750_.info("Aether dimension: reducing target chunks to {} for stability", targetChunks);
++         }
++
++         while (serverchunkcache.m_8427_() < targetChunks) {
++            long currentTime = Util.m_137550_();
++            if (currentTime - chunkLoadStartTime > chunkLoadTimeout) {
++               int currentLoaded = serverchunkcache.m_8427_();
++               f_129750_.error("Chunk loading timeout after {}ms for dimension {}, loaded {}/{} chunks",
++                             currentTime - chunkLoadStartTime, serverlevel.dimension().location(), currentLoaded, targetChunks);
++
++               if (isModDimension && currentLoaded > 100) {
++                  // For mod dimensions, if we've loaded a reasonable number of chunks, consider it acceptable
++                  f_129750_.warn("Mod dimension {} has loaded {} chunks, continuing despite not reaching target",
++                               dimensionName, currentLoaded);
++                  break;
++               }
++
++               if (++retryCount >= maxRetries) {
++                  f_129750_.error("Max retries ({}) reached for chunk loading, skipping to prevent server freeze", maxRetries);
++                  break;
++               }
++               chunkLoadStartTime = currentTime; // Reset timer for retry
++               executeModeratelyStartTime = 0L; // Reset executeModerately timer
++            }
 +            this.executeModerately();
 +         }
++
++         // Reset executeModerately timer after successful completion
++         executeModeratelyStartTime = 0L;
        }
  
 -      this.f_129726_ = Util.m_137550_() + 10L;
@@ -402,6 +456,13 @@
  
        f_129750_.info("Stopping server");
 +      WatchMohist.stop();
++      // Mohist Fix: Shutdown Worker thread pool
++      try {
++         net.minecraft.server.level.ServerChunkCache.shutdownWorkerThreadPool();
++         f_129750_.info("Worker thread pool shutdown completed");
++      } catch (Exception e) {
++         f_129750_.warn("Error shutting down worker thread pool", e);
++      }
 +      // CraftBukkit start
 +      if (this.server != null) {
 +         this.server.disablePlugins();
@@ -539,7 +600,25 @@
 +      return this.forceTicks || this.m_18767_() || Util.m_137550_() < (this.f_129728_ ? this.f_129727_ : this.f_129726_);
 +   }
 +
++   // Add timeout mechanism to prevent infinite loops
++   private static final long EXECUTE_MODERATELY_TIMEOUT = 30000L; // 30 seconds timeout
++   private long executeModeratelyStartTime = 0L;
++
 +   private void executeModerately() {
++      // Initialize start time if not set
++      if (executeModeratelyStartTime == 0L) {
++         executeModeratelyStartTime = Util.m_137550_();
++      }
++
++      // Check for timeout
++      long currentTime = Util.m_137550_();
++      if (currentTime - executeModeratelyStartTime > EXECUTE_MODERATELY_TIMEOUT) {
++         f_129750_.warn("executeModerately() timeout detected after {}ms, breaking execution to prevent server freeze",
++                       currentTime - executeModeratelyStartTime);
++         executeModeratelyStartTime = 0L; // Reset for next call
++         return;
++      }
++
 +      this.m_18699_();
 +      java.util.concurrent.locks.LockSupport.parkNanos("executing tasks", 1000L);
 +   }
