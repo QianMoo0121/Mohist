@@ -865,23 +865,30 @@ public class CraftEventFactory {
         return !event.isCancelled();
     }
 
-    public static EntityDeathEvent callEntityDeathEvent(LivingEntity victim) {
+    public static Collection<ItemEntity> callEntityDeathEvent(LivingEntity victim) {
         return callEntityDeathEvent(victim, new java.util.ArrayList<>());
     }
 
-    public static EntityDeathEvent callEntityDeathEvent(LivingEntity victim, Collection<ItemEntity> captureDrops) {
+    public static Collection<ItemEntity> callEntityDeathEvent(LivingEntity victim, Collection<ItemEntity> captureDrops) {
         List<org.bukkit.inventory.ItemStack> drops;
         if (captureDrops == null) {
             drops = new ArrayList<>();
-        } else if (captureDrops instanceof List) {
-            drops = Lists.transform((List<ItemEntity>) captureDrops, e -> CraftItemStack.asCraftMirror(e.getItem()));
         } else {
             drops = captureDrops.stream().map(ItemEntity::getItem).map(CraftItemStack::asCraftMirror).collect(Collectors.toList());
         }
         CraftLivingEntity entity = (CraftLivingEntity) victim.getBukkitEntity();
         EntityDeathEvent event = new EntityDeathEvent(entity, drops, victim.getExperienceReward());
+        CraftWorld world = (CraftWorld) entity.getWorld();
         Bukkit.getServer().getPluginManager().callEvent(event);
-        return event;
+
+        List<ItemEntity> items = new ArrayList<>();
+        for (org.bukkit.inventory.ItemStack stack : event.getDrops()) {
+            if (stack == null || stack.getType() == Material.AIR || stack.getAmount() == 0) continue;
+            var loc = entity.getLocation();
+            ItemEntity itemEntity = new ItemEntity(world.getHandle(), loc.getX(), loc.getY(), loc.getZ(), CraftItemStack.asNMSCopy(stack));
+            items.add(itemEntity);
+        }
+        return items;
     }
 
     public static PlayerDeathEvent callPlayerDeathEvent(ServerPlayer victim, List<org.bukkit.inventory.ItemStack> drops, String deathMessage, boolean keepInventory) {
